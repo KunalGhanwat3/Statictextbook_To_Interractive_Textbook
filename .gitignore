@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+venv/
+env/
+
+# Environment variables (VERY IMPORTANT)
+.env
+backend/.env
+
+# Uploaded files (PDFs)
+backend/uploads/
+
+# OS files
+.DS_Store
+
+# VS Code
+.vscode/
