@@ -6,6 +6,12 @@ __pycache__/
 # Virtual environment
 venv/
 env/
+.venv/
+
+# Caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Environment variables (VERY IMPORTANT)
 .env
@@ -17,5 +23,9 @@ backend/uploads/
 # OS files
 .DS_Store
 
-# VS Code
+# Editors
 .vscode/
+.idea/
+
+# Node (frontend also has its own .gitignore)
+node_modules/
