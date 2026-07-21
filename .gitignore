@@ -29,3 +29,7 @@ backend/uploads/
 
 # Node (frontend also has its own .gitignore)
 node_modules/
+
+# Test/debug artifacts
+.playwright-mcp/
+rag-answer.png

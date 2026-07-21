@@ -1,11 +1,36 @@
-from langchain_community.llms import HuggingFaceHub
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
+from transformers import pipeline
 import os
 
-# Use Hugging Face's free inference API
-# You can use other models like "google/flan-t5-large", "mistralai/Mistral-7B-Instruct-v0.2"
-LLM_MODEL = "google/flan-t5-large"
+# ponytail: local flan-t5 — HF retired hosted api-inference.huggingface.co, so run in-process.
+# base for CPU speed; swap to "google/flan-t5-large" if answer quality matters more than latency.
+LLM_MODEL = "google/flan-t5-base"
+
+_pipe = None
+
+
+def _get_pipe():
+    """Lazy-load the seq2seq pipeline once (first call downloads the model)."""
+    global _pipe
+    if _pipe is None:
+        _pipe = pipeline("text2text-generation", model=LLM_MODEL)
+    return _pipe
+
+
+PROMPT_TEMPLATE = """Based on the following context from a document, provide a clear, accurate, and comprehensive answer to the question.
+
+Context:
+{context}
+
+Question: {question}
+
+Instructions:
+- Answer directly and concisely based ONLY on the provided context
+- Include specific details, numbers, technologies, or names mentioned in the context
+- If the context mentions projects, list them with their key details
+- If the context doesn't contain enough information, say so
+- Use professional and clear language
+
+Answer:"""
 
 def generate_answer(query, retrieved_docs):
     """
@@ -28,50 +53,22 @@ def generate_answer(query, retrieved_docs):
     
     context = "\n".join(context_parts)
     
-    # Enhanced prompt template for better answers
-    prompt_template = PromptTemplate(
-        input_variables=["context", "question"],
-        template="""Based on the following context from a document, provide a clear, accurate, and comprehensive answer to the question. 
-
-Context:
-{context}
-
-Question: {question}
-
-Instructions:
-- Answer directly and concisely based ONLY on the provided context
-- Include specific details, numbers, technologies, or names mentioned in the context
-- If the context mentions projects, list them with their key details
-- If the context doesn't contain enough information, say so
-- Use professional and clear language
-
-Answer:"""
-    )
-    
     try:
-        # Initialize LLM (using Hugging Face Hub - free tier)
-        # Note: For production, set HUGGINGFACEHUB_API_TOKEN environment variable
-        llm = HuggingFaceHub(
-            repo_id=LLM_MODEL,
-            model_kwargs={
-                "temperature": 0.3,  # Lower = more focused, higher = more creative
-                "max_length": 512,
-                "top_p": 0.95
-            }
+        prompt = PROMPT_TEMPLATE.format(context=context, question=query)
+
+        # flan-t5 caps input at 512 tokens; truncation keeps long contexts from erroring.
+        result = _get_pipe()(
+            prompt,
+            max_new_tokens=256,
+            do_sample=False,  # greedy: deterministic, focused answers
+            truncation=True,
         )
-        
-        chain = LLMChain(llm=llm, prompt=prompt_template)
-        
-        # Generate answer
-        answer = chain.run(context=context, question=query)
-        
-        # Clean up the answer
-        answer = answer.strip()
-        
+        answer = result[0]["generated_text"].strip()
+
         # If answer is too short or looks like an error, provide fallback
         if len(answer) < 10 or "I don't know" in answer.lower():
             answer = create_fallback_answer(query, retrieved_docs)
-            
+
     except Exception as e:
         print(f"LLM generation error: {e}")
         # Fallback to extractive summarization

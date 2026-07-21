@@ -1,6 +1,11 @@
 from fastapi import FastAPI, UploadFile, File, Query
 import os
+from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
+
+# Load backend/.env regardless of cwd (uvicorn is launched from repo root)
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+
 from backend.app.pdf_loader import load_pdf
 from backend.app.chunker import chunk_text
 from backend.app.rag import create_vector_store, retrieve_chunks
