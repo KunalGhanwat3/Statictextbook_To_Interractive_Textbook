@@ -1,109 +1,81 @@
-from transformers import pipeline
 import os
+from openai import OpenAI
 
-# ponytail: local flan-t5 — HF retired hosted api-inference.huggingface.co, so run in-process.
-# base for CPU speed; swap to "google/flan-t5-large" if answer quality matters more than latency.
-LLM_MODEL = "google/flan-t5-large"
+# gpt-4o-mini: cheap, fast, large context, strong reasoning — good default for RAG Q&A.
+# Swap to "gpt-4o" if you want max quality and don't mind higher cost.
+LLM_MODEL = "gpt-4o-mini"
 
-_pipe = None
-
-
-def _get_pipe():
-    """Lazy-load the seq2seq pipeline once (first call downloads the model)."""
-    global _pipe
-    if _pipe is None:
-        _pipe = pipeline("text2text-generation", model=LLM_MODEL)
-    return _pipe
+_client = None
 
 
-PROMPT_TEMPLATE = PROMPT_TEMPLATE = """Use ONLY the context below to answer the question.
-If the question asks for a number of items (e.g. "top 3"), answer as a numbered list with exactly that many entries — one short, specific sentence each. Name concrete technologies, tools, or skills. Do not add extra commentary.
+def _get_client():
+    """Create the OpenAI client once. Reads OPENAI_API_KEY from the environment."""
+    global _client
+    if _client is None:
+        _client = OpenAI()
+    return _client
 
-Context:
-{context}
 
-Question: {question}
+SYSTEM_PROMPT = (
+    "You answer questions using ONLY the provided context from a document. "
+    "Be specific and cite concrete names, numbers, and technologies. "
+    "If the question asks for a number of items (e.g. 'top 3'), answer as a "
+    "numbered list with exactly that many entries. If the context does not "
+    "contain the answer, say so plainly."
+)
 
-Instructions:
-- Answer directly and concisely based ONLY on the provided context
-- Include specific details, numbers, technologies, or names mentioned in the context
-- If the context mentions projects, list them with their key details
-- If the context doesn't contain enough information, say so
-- Use professional and clear language
-
-Answer:"""
 
 def generate_answer(query, retrieved_docs):
-    """
-    Generate answer using LLM with proper context from retrieved documents.
-    """
+    """Generate an answer with OpenAI, grounded in the retrieved chunks."""
     if not retrieved_docs:
         return {
             "answer": "I could not find relevant information in the document to answer your question.",
-            "citations": []
+            "citations": [],
         }
-    
-    # Extract context and citations
+
     context_parts = []
     citations = []
-    
     for idx, doc in enumerate(retrieved_docs):
         page = doc.metadata.get("page", "Unknown")
         citations.append(page)
         context_parts.append(f"[Source {idx+1}, Page {page}]:\n{doc.page_content}\n")
-    
     context = "\n".join(context_parts)
-    
+
+    user_prompt = f"Context:\n{context}\n\nQuestion: {query}"
+
     try:
-        prompt = PROMPT_TEMPLATE.format(context=context, question=query)
-
-        # flan-t5 caps input at 512 tokens; truncation keeps long contexts from erroring.
-        result = _get_pipe()(
-            prompt,
-            max_new_tokens=256,
-            min_new_tokens=40,
-            num_beams=4,
-            early_stopping= True,
-            do_sample=False,  # greedy: deterministic, focused answers
-            truncation=True,
+        resp = _get_client().chat.completions.create(
+            model=LLM_MODEL,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.2,
         )
-        answer = result[0]["generated_text"].strip()
-
-        # If answer is too short or looks like an error, provide fallback
-        if len(answer) < 10 or "I don't know" in answer.lower():
-            answer = create_fallback_answer(query, retrieved_docs)
-
+        answer = resp.choices[0].message.content.strip()
     except Exception as e:
         print(f"LLM generation error: {e}")
-        # Fallback to extractive summarization
         answer = create_fallback_answer(query, retrieved_docs)
-    
+
     return {
         "answer": answer,
-        "citations": sorted(list(set(citations)))
+        "citations": sorted(list(set(citations))),
     }
 
 
 def create_fallback_answer(query, retrieved_docs):
-    """
-    Fallback method using extractive summarization when LLM fails.
-    Better than the old keyword matching approach.
-    """
+    """Extractive fallback used when the API call fails."""
     import re
-    
-    # Combine all context
+
     all_text = []
     for doc in retrieved_docs:
         page = doc.metadata.get("page", "Unknown")
         sentences = re.split(r'(?<=[.!?])\s+', doc.page_content)
-        for sent in sentences[:5]:  # Take top sentences from each chunk
-            if len(sent.strip()) > 20:  # Filter out very short fragments
+        for sent in sentences[:5]:
+            if len(sent.strip()) > 20:
                 all_text.append(f"{sent.strip()} (Page {page})")
-    
+
     if not all_text:
         return "Based on the retrieved content, I couldn't generate a specific answer. Please try rephrasing your question."
-    
-    # Return top relevant sentences
-    answer = " ".join(all_text[:4])  # Combine top 4 sentences
-    
-    return answer
+
+    return " ".join(all_text[:4])

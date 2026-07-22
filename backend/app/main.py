@@ -35,7 +35,7 @@ def ask_question(query: str = Query(...)):
     if vector_store is None:
         return {"error": "Please upload a PDF first."}
 
-    retrieved_docs = retrieve_chunks(query, vector_store, k=2)
+    retrieved_docs = retrieve_chunks(query, vector_store, k=6)
     result = generate_answer(query, retrieved_docs)
 
     return {
