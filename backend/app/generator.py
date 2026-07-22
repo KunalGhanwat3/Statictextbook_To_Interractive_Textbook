@@ -16,7 +16,8 @@ def _get_pipe():
     return _pipe
 
 
-PROMPT_TEMPLATE = """Based on the following context from a document, provide a clear, accurate, and comprehensive answer to the question.
+PROMPT_TEMPLATE = PROMPT_TEMPLATE = """Use ONLY the context below to answer the question.
+If the question asks for a number of items (e.g. "top 3"), answer as a numbered list with exactly that many entries — one short, specific sentence each. Name concrete technologies, tools, or skills. Do not add extra commentary.
 
 Context:
 {context}
@@ -60,6 +61,9 @@ def generate_answer(query, retrieved_docs):
         result = _get_pipe()(
             prompt,
             max_new_tokens=256,
+            min_new_tokens=40,
+            num_beams=4,
+            early_stopping= True,
             do_sample=False,  # greedy: deterministic, focused answers
             truncation=True,
         )
