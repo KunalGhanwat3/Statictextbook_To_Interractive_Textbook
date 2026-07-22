@@ -3,7 +3,7 @@ import os
 
 # ponytail: local flan-t5 — HF retired hosted api-inference.huggingface.co, so run in-process.
 # base for CPU speed; swap to "google/flan-t5-large" if answer quality matters more than latency.
-LLM_MODEL = "google/flan-t5-base"
+LLM_MODEL = "google/flan-t5-large"
 
 _pipe = None
 
