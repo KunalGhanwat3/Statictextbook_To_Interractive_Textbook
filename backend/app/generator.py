@@ -17,11 +17,12 @@ def _get_client():
 
 
 SYSTEM_PROMPT = (
-    "You answer questions using ONLY the provided context from a document. "
-    "Be specific and cite concrete names, numbers, and technologies. "
-    "If the question asks for a number of items (e.g. 'top 3'), answer as a "
-    "numbered list with exactly that many entries. If the context does not "
-    "contain the answer, say so plainly."
+    "You answer questions using ONLY the provided context, which comes from one "
+    "or more uploaded documents. Be specific and cite concrete names, numbers, "
+    "and technologies. When a fact clearly comes from a particular document, you "
+    "may mention which one. If the question asks for a number of items (e.g. "
+    "'top 3'), answer as a numbered list with exactly that many entries. If the "
+    "context does not contain the answer, say so plainly."
 )
 
 
@@ -29,16 +30,19 @@ def generate_answer(query, retrieved_docs):
     """Generate an answer with OpenAI, grounded in the retrieved chunks."""
     if not retrieved_docs:
         return {
-            "answer": "I could not find relevant information in the document to answer your question.",
+            "answer": "I couldn't find relevant information in the uploaded documents to answer your question.",
             "citations": [],
         }
 
     context_parts = []
     citations = []
     for idx, doc in enumerate(retrieved_docs):
+        source = doc.metadata.get("source") or "Unknown document"
         page = doc.metadata.get("page", "Unknown")
-        citations.append(page)
-        context_parts.append(f"[Source {idx+1}, Page {page}]:\n{doc.page_content}\n")
+        citations.append({"source": source, "page": page})
+        context_parts.append(
+            f"[Source {idx + 1} — {source}, page {page}]:\n{doc.page_content}\n"
+        )
     context = "\n".join(context_parts)
 
     user_prompt = f"Context:\n{context}\n\nQuestion: {query}"
@@ -59,8 +63,25 @@ def generate_answer(query, retrieved_docs):
 
     return {
         "answer": answer,
-        "citations": sorted(list(set(citations))),
+        "citations": _dedupe_citations(citations),
     }
+
+
+def _dedupe_citations(citations):
+    """Drop duplicate (source, page) pairs and sort them for a tidy display."""
+    seen = set()
+    unique = []
+    for c in citations:
+        key = (c["source"], c["page"])
+        if key not in seen:
+            seen.add(key)
+            unique.append(c)
+
+    def sort_key(c):
+        page = c["page"]
+        return (str(c["source"]), page if isinstance(page, int) else 0)
+
+    return sorted(unique, key=sort_key)
 
 
 def create_fallback_answer(query, retrieved_docs):
@@ -69,11 +90,12 @@ def create_fallback_answer(query, retrieved_docs):
 
     all_text = []
     for doc in retrieved_docs:
+        source = doc.metadata.get("source") or "document"
         page = doc.metadata.get("page", "Unknown")
         sentences = re.split(r'(?<=[.!?])\s+', doc.page_content)
         for sent in sentences[:5]:
             if len(sent.strip()) > 20:
-                all_text.append(f"{sent.strip()} (Page {page})")
+                all_text.append(f"{sent.strip()} ({source}, p.{page})")
 
     if not all_text:
         return "Based on the retrieved content, I couldn't generate a specific answer. Please try rephrasing your question."
