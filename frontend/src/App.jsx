@@ -133,8 +133,8 @@ function App() {
         <div className="brand">
           <span className="brand-mark" aria-hidden="true" />
           <div>
-            <h1 className="brand-name">Marginalia</h1>
-            <p className="brand-sub">Ask your textbooks, grounded in the page</p>
+            <h1 className="brand-name">Statictextbook</h1>
+            <p className="brand-sub">Ask your textbooks</p>
           </div>
         </div>
         <div className="library-stat">
