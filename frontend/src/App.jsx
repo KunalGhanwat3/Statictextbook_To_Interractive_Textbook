@@ -1,142 +1,283 @@
-import { useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
 import "./App.css";
 
+const backendUrl = "http://127.0.0.1:8000";
+
 function App() {
-  const [file, setFile] = useState(null);
-  const [query, setQuery] = useState("");
-  const [uploadMessage, setUploadMessage] = useState("");
-  const [answer, setAnswer] = useState("");
-  const [citations, setCitations] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [documents, setDocuments] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const [question, setQuestion] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [asking, setAsking] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [notice, setNotice] = useState(null); // { type: "error" | "info", text }
 
-  const backendUrl = "http://127.0.0.1:8000";
+  const fileInputRef = useRef(null);
+  const scrollRef = useRef(null);
 
-  const handleFileChange = (event) => {
-    setFile(event.target.files[0]);
-  };
+  // Load the existing library (if the backend is already running).
+  useEffect(() => {
+    axios
+      .get(`${backendUrl}/documents`)
+      .then((res) => setDocuments(res.data.documents || []))
+      .catch(() => {
+        /* backend may be offline at first paint — ignore */
+      });
+  }, []);
 
-  const handleUpload = async () => {
-    if (!file) {
-      setUploadMessage("Please select a PDF first.");
+  // Keep the conversation scrolled to the newest message.
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, asking]);
+
+  const uploadFiles = useCallback(async (fileList) => {
+    const pdfs = Array.from(fileList).filter(
+      (f) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")
+    );
+
+    if (pdfs.length === 0) {
+      setNotice({ type: "error", text: "Those weren't PDFs. Add one or more .pdf files." });
       return;
     }
 
     const formData = new FormData();
-    formData.append("file", file);
+    pdfs.forEach((f) => formData.append("files", f));
 
     try {
-      setLoading(true);
-
-      const response = await axios.post(`${backendUrl}/upload-pdf`, formData, {
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
+      setUploading(true);
+      setNotice(null);
+      const res = await axios.post(`${backendUrl}/upload-pdfs`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
       });
+      setDocuments(res.data.documents || []);
 
-      setUploadMessage(
-        `${response.data.message} | Pages: ${response.data.total_pages} | Chunks: ${response.data.total_chunks}`
-      );
-      setAnswer("");
-      setCitations([]);
-    } catch (error) {
-      console.error(error);
-
-      const errorMessage =
-        error.response?.data?.detail ||
-        error.response?.data?.error ||
-        error.message ||
-        "Error uploading PDF.";
-
-      setUploadMessage(`Error uploading PDF: ${errorMessage}`);
+      const added = (res.data.processed || []).filter((p) => !p.skipped);
+      const pages = added.reduce((n, p) => n + (p.pages || 0), 0);
+      setNotice({
+        type: "info",
+        text: `Added ${added.length} PDF${added.length === 1 ? "" : "s"} · ${pages} pages ready to search.`,
+      });
+    } catch (err) {
+      const detail = err.response?.data?.detail || err.message || "Upload failed.";
+      setNotice({ type: "error", text: `Couldn't process that: ${detail}` });
     } finally {
-      setLoading(false);
+      setUploading(false);
+    }
+  }, []);
+
+  const onDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    if (e.dataTransfer.files?.length) uploadFiles(e.dataTransfer.files);
+  };
+
+  const removeDocument = async (name) => {
+    try {
+      const res = await axios.delete(`${backendUrl}/documents/${encodeURIComponent(name)}`);
+      setDocuments(res.data.documents || []);
+    } catch (err) {
+      setNotice({ type: "error", text: `Couldn't remove ${name}.` });
     }
   };
 
-  const handleAsk = async () => {
-    if (!query.trim()) {
+  const ask = async () => {
+    const q = question.trim();
+    if (!q) return;
+
+    if (documents.length === 0) {
+      setNotice({ type: "error", text: "Add at least one PDF before asking." });
       return;
     }
 
+    setNotice(null);
+    setMessages((m) => [...m, { role: "user", text: q }]);
+    setQuestion("");
+
     try {
-      setLoading(true);
-
-      const response = await axios.get(`${backendUrl}/ask`, {
-        params: { query },
-      });
-
-      if (response.data.error) {
-        setAnswer(response.data.error);
-        setCitations([]);
-        return;
+      setAsking(true);
+      const res = await axios.get(`${backendUrl}/ask`, { params: { query: q } });
+      if (res.data.error) {
+        setMessages((m) => [...m, { role: "assistant", text: res.data.error, citations: [] }]);
+      } else {
+        setMessages((m) => [
+          ...m,
+          { role: "assistant", text: res.data.answer || "", citations: res.data.citations || [] },
+        ]);
       }
-
-      setAnswer(response.data.answer || "");
-      setCitations(response.data.citations || []);
-    } catch (error) {
-      console.error(error);
-
-      const errorMessage =
-        error.response?.data?.detail ||
-        error.response?.data?.error ||
-        error.message ||
-        "Error getting answer.";
-
-      setAnswer(errorMessage);
-      setCitations([]);
+    } catch (err) {
+      const detail = err.response?.data?.detail || err.message || "Something went wrong.";
+      setMessages((m) => [
+        ...m,
+        { role: "assistant", text: `Couldn't reach the answer engine: ${detail}`, citations: [] },
+      ]);
     } finally {
-      setLoading(false);
+      setAsking(false);
     }
   };
 
+  const onQuestionKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      ask();
+    }
+  };
+
+  const totalPages = documents.reduce((n, d) => n + (d.pages || 0), 0);
+
   return (
     <div className="app">
-      <h1>Interactive Textbook using RAG</h1>
-
-      <div className="card">
-        <h2>Upload PDF</h2>
-
-        <input
-          type="file"
-          accept="application/pdf"
-          onChange={handleFileChange}
-        />
-
-        <button onClick={handleUpload} disabled={loading}>
-          {loading ? "Processing..." : "Upload PDF"}
-        </button>
-
-        {uploadMessage && <p className="message">{uploadMessage}</p>}
-      </div>
-
-      <div className="card">
-        <h2>Ask a Question</h2>
-
-        <textarea
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Ask something from the uploaded textbook..."
-          rows="4"
-        />
-
-        <button onClick={handleAsk} disabled={loading}>
-          {loading ? "Thinking..." : "Ask"}
-        </button>
-      </div>
-
-      <div className="card">
-        <h2>Answer</h2>
-
-        {answer ? <p>{answer}</p> : <p>No answer yet.</p>}
-
-        {citations.length > 0 && (
+      <header className="topbar">
+        <div className="brand">
+          <span className="brand-mark" aria-hidden="true" />
           <div>
-            <h3>Citations</h3>
-            <p>{citations.join(", ")}</p>
+            <h1 className="brand-name">Marginalia</h1>
+            <p className="brand-sub">Ask your textbooks, grounded in the page</p>
           </div>
-        )}
-      </div>
+        </div>
+        <div className="library-stat">
+          {documents.length > 0
+            ? `${documents.length} source${documents.length === 1 ? "" : "s"} · ${totalPages} pages`
+            : "No sources yet"}
+        </div>
+      </header>
+
+      <main className="layout">
+        <aside className="sources">
+          <div className="panel-label">Sources</div>
+
+          <div
+            className={`dropzone${dragOver ? " is-over" : ""}${uploading ? " is-busy" : ""}`}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={onDrop}
+            onClick={() => fileInputRef.current?.click()}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) =>
+              (e.key === "Enter" || e.key === " ") && fileInputRef.current?.click()
+            }
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/pdf"
+              multiple
+              className="file-input"
+              onChange={(e) => {
+                if (e.target.files?.length) uploadFiles(e.target.files);
+                e.target.value = "";
+              }}
+            />
+            {uploading ? (
+              <span className="dropzone-text">Processing…</span>
+            ) : (
+              <>
+                <span className="dropzone-title">Drop PDFs here</span>
+                <span className="dropzone-hint">or click to browse · multiple allowed</span>
+              </>
+            )}
+          </div>
+
+          <ul className="source-list">
+            {documents.map((d) => (
+              <li className="source-item" key={d.name}>
+                <div className="source-info">
+                  <span className="source-name" title={d.name}>
+                    {d.name}
+                  </span>
+                  <span className="source-meta">{d.pages} pages</span>
+                </div>
+                <button
+                  className="source-remove"
+                  aria-label={`Remove ${d.name}`}
+                  onClick={() => removeDocument(d.name)}
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+            {documents.length === 0 && !uploading && (
+              <li className="source-empty">Your uploaded books will appear here.</li>
+            )}
+          </ul>
+        </aside>
+
+        <section className="chat">
+          <div className="messages" ref={scrollRef}>
+            {messages.length === 0 ? (
+              <div className="empty">
+                <span className="empty-mark" aria-hidden="true" />
+                <h2 className="empty-title">
+                  {documents.length === 0 ? "Add a book to begin" : "Ask anything from your books"}
+                </h2>
+                <p className="empty-text">
+                  {documents.length === 0
+                    ? "Upload one or more PDFs on the left. Once they're processed, ask questions in plain language and get answers pulled straight from the pages."
+                    : "Questions search across every source you've added. Each answer shows the exact document and page it came from."}
+                </p>
+              </div>
+            ) : (
+              messages.map((m, i) => (
+                <div className={`msg msg-${m.role}`} key={i}>
+                  <div className="msg-role">{m.role === "user" ? "You" : "From your books"}</div>
+                  <div className="msg-text">{m.text}</div>
+                  {m.role === "assistant" && m.citations?.length > 0 && (
+                    <div className="citations">
+                      {m.citations.map((c, j) => (
+                        <span className="chip" key={j}>
+                          <span className="chip-src">{c.source}</span>
+                          <span className="chip-page">p.{c.page}</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+
+            {asking && (
+              <div className="msg msg-assistant">
+                <div className="msg-role">From your books</div>
+                <div className="thinking">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {notice && (
+            <div className={`notice notice-${notice.type}`} role="status">
+              {notice.text}
+            </div>
+          )}
+
+          <div className="composer">
+            <textarea
+              className="composer-input"
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              onKeyDown={onQuestionKeyDown}
+              placeholder={
+                documents.length === 0
+                  ? "Add a PDF to start asking…"
+                  : "Ask something from your books…"
+              }
+              rows={1}
+            />
+            <button className="composer-send" onClick={ask} disabled={asking || uploading}>
+              {asking ? "Thinking…" : "Ask"}
+            </button>
+          </div>
+        </section>
+      </main>
     </div>
   );
 }
