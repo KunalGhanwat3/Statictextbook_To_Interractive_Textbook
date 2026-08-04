@@ -1,0 +1,92 @@
+[
+  {
+    "question": "What is the value of Transaction 1?",
+    "reference_answer": "$100",
+    "gold_page": 599
+  },
+  {
+    "question": "What is the first step in the gradient descent process as described in the passage?",
+    "reference_answer": "Start somewhere on the mountain.",
+    "gold_page": 119
+  },
+  {
+    "question": "What packages will be used in the later chapters for implementing machine learning algorithms?",
+    "reference_answer": "Scikit-Learn, Turi Create, or Keras",
+    "gold_page": 32
+  },
+  {
+    "question": "What function is used to create the logistic classifier model in the passage?",
+    "reference_answer": "The function used to create the logistic classifier model is 'create' in the logistic_classifier package.",
+    "gold_page": 248
+  },
+  {
+    "question": "What is the output of the sigmoid function when the input score is zero?",
+    "reference_answer": "0.5",
+    "gold_page": 223
+  },
+  {
+    "question": "What is the process called that starts with a random line and moves it step by step to build a better separator?",
+    "reference_answer": "The perceptron algorithm.",
+    "gold_page": 210
+  },
+  {
+    "question": "What happens to the testing error of an overfit model?",
+    "reference_answer": "The overfit model will do poorly (large testing error).",
+    "gold_page": 141
+  },
+  {
+    "question": "What is the predicted price for a house with 4 rooms according to the model?",
+    "reference_answer": "$303.30",
+    "gold_page": 113
+  },
+  {
+    "question": "What is the URL for the GitHub repository mentioned in Chapter 11?",
+    "reference_answer": "http://mng.bz/ED6r",
+    "gold_page": 672
+  },
+  {
+    "question": "How does the strong learner make its prediction based on the weak classifiers' votes?",
+    "reference_answer": "The strong learner makes its prediction by obtaining a weighted vote of the weak classifiers, where each classifier's vote is its score. If the resulting prediction is greater than or equal to zero, the strong learner predicts a 1; if it is negative, it predicts a 0.",
+    "gold_page": 507
+  },
+  {
+    "question": "What does the y-intercept tell us about a line?",
+    "reference_answer": "The y-intercept tells us the location of the line.",
+    "gold_page": 102
+  },
+  {
+    "question": "What age ranges are suggested for binning the ages in the model?",
+    "reference_answer": "From 0 to 10 years old, From 11 to 20 years old, From 21 to 30 years old, From 31 to 40 years old, From 41 to 50 years old, From 51 to 60 years old, From 61 to 70 years old, From 71 to 80 years old, 81 years old or older.",
+    "gold_page": 543
+  },
+  {
+    "question": "What is the best cutoff age for the prediction according to the passage?",
+    "reference_answer": "35 years old",
+    "gold_page": 396
+  },
+  {
+    "question": "What is the goal of an algorithm as defined in the passage?",
+    "reference_answer": "The goal of an algorithm is to build a model.",
+    "gold_page": 41
+  },
+  {
+    "question": "What analogy is used in the passage to describe the relationship between artificial intelligence, machine learning, and deep learning?",
+    "reference_answer": "AI is compared to vehicles, ML to cars, and DL to Ferraris.",
+    "gold_page": 38
+  },
+  {
+    "question": "What happens to the value of the difference when a point is above the line?",
+    "reference_answer": "The value of the difference is positive when a point is above the line.",
+    "gold_page": 107
+  },
+  {
+    "question": "What are the new weights and bias calculated for a perceptron after applying the perceptron trick?",
+    "reference_answer": "a' = a + \u03b7(y - \u0177)x1, b' = b + \u03b7(y - \u0177)x2, c' = c + \u03b7(y - \u0177)",
+    "gold_page": 207
+  },
+  {
+    "question": "What were the weights and bias of the perceptron model after training?",
+    "reference_answer": "Weight of aack: 2.70, Weight of beep: 2.46, Bias: \u20138.96",
+    "gold_page": 215
+  }
+]

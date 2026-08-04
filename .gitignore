@@ -33,3 +33,6 @@ node_modules/
 # Test/debug artifacts
 .playwright-mcp/
 rag-answer.png
+
+# RAG eval run artifacts (questions.json is committed; results are per-run)
+backend/eval/results.json
