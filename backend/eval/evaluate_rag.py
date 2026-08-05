@@ -5,9 +5,13 @@ Runs the REAL pipeline (load_pdf -> chunk -> FAISS -> retrieve -> generate)
 twice per question: reranker OFF (baseline) and ON. Reports, per arm:
   Hit@k, MRR, answer correctness (1-5), faithfulness (1-5), retrieval latency.
 
-Questions are auto-generated from the test PDF with an LLM (gpt-4o-mini) and
-cached to questions.json — each question records the source chunk's page as the
-gold page, giving us a retrieval ground-truth label for free.
+The store is built from MULTIPLE books, so each question's gold label records
+both the source file AND the page — page numbers collide across books, so
+retrieval is scored on (source, page), not page alone.
+
+Questions are auto-generated from the PDFs with an LLM (gpt-4o-mini), balanced
+across books, deliberately reasoning-heavy (not lookups), and cached to
+questions.json so re-runs are deterministic and free.
 
 Run from repo root:
     ./backend/.venv/bin/python -m backend.eval.evaluate_rag
@@ -29,24 +33,27 @@ from backend.app.generator import generate_answer, _get_client
 
 # --- config (all easy to change) ---------------------------------------------
 HERE = os.path.dirname(__file__)
-PDF_PATH = os.path.join(
-    HERE, "..", "uploads", "Grokking_Machine_Learning_-_Luis_Serrano.pdf"
-)
+UPLOADS = os.path.join(HERE, "..", "uploads")
+PDF_PATHS = [
+    os.path.join(UPLOADS, "Grokking_Machine_Learning_-_Luis_Serrano.pdf"),
+    os.path.join(UPLOADS, "_OceanofPDF.com_Hands-On_Machine_Learning_with_Scikit-Learn_and_PyTorch_-_Aurelien_Geron.pdf"),
+]
 QUESTIONS_FILE = os.path.join(HERE, "questions.json")
 RESULTS_FILE = os.path.join(HERE, "results.json")
 
-N_QUESTIONS = 18
-K = 6           # chunks fed to the LLM
-FETCH_K = 20    # candidate pool the reranker re-scores
+N_PER_BOOK = 20     # questions sampled per book
+K = 6               # chunks fed to the LLM
+FETCH_K = 20        # candidate pool the reranker re-scores
 JUDGE_MODEL = "gpt-4o-mini"
 SEED = 42
 
 
 # --- retrieval metrics (pure) ------------------------------------------------
-def gold_rank(retrieved_docs, gold_page):
-    """1-based rank of the gold page in the retrieved list, or None if absent."""
+def gold_rank(retrieved_docs, gold_source, gold_page):
+    """1-based rank of the gold (source, page) in the retrieved list, else None."""
     for i, doc in enumerate(retrieved_docs):
-        if doc.metadata.get("page") == gold_page:
+        if (doc.metadata.get("source") == gold_source
+                and doc.metadata.get("page") == gold_page):
             return i + 1
     return None
 
@@ -55,40 +62,66 @@ def reciprocal_rank(rank):
     return 1.0 / rank if rank else 0.0
 
 
+# --- shared pipeline setup ---------------------------------------------------
+def build_store():
+    """Build one FAISS index over every book; return (store, chunks_by_source)."""
+    chunks_by_source = {}
+    all_chunks = []
+    for path in PDF_PATHS:
+        name = os.path.basename(path)
+        pages = load_pdf(path)
+        chunks = chunk_text(pages, source=name)
+        chunks_by_source[name] = chunks
+        all_chunks.extend(chunks)
+        print(f"  {name}: {len(pages)} pages -> {len(chunks)} chunks")
+    print(f"Embedding {len(all_chunks)} chunks from {len(PDF_PATHS)} books...")
+    return create_vector_store(all_chunks), chunks_by_source
+
+
 # --- question generation (cached) --------------------------------------------
-def generate_questions(chunks):
-    """Sample substantial chunks and have the LLM write a Q + reference answer."""
+TOUGH_PROMPT = (
+    "You are writing an exam question from a machine-learning textbook passage.\n"
+    "Write ONE challenging question that tests real understanding — it must "
+    "require reasoning about the concept (why / how / what-would-happen-if / "
+    "explain-the-mechanism / apply-the-idea), NOT copying a sentence. It must "
+    "still be fully answerable from THIS passage alone. Also give a concise, "
+    "correct reference answer.\n"
+    'Respond as JSON: {"question": "...", "answer": "..."}\n\nPassage:\n'
+)
+
+
+def generate_questions(chunks_by_source):
+    """Sample substantial chunks from EACH book; LLM writes a tough Q + answer."""
     client = _get_client()
-    substantial = [c for c in chunks if len(c["content"]) > 300]
     random.seed(SEED)
-    sample = random.sample(substantial, min(N_QUESTIONS, len(substantial)))
-
     questions = []
-    for c in sample:
-        prompt = (
-            "From the textbook passage below, write ONE specific factual "
-            "question that can be answered using only this passage, plus a "
-            "concise reference answer. Avoid vague questions. Respond as JSON: "
-            '{"question": "...", "answer": "..."}\n\nPassage:\n' + c["content"]
-        )
-        try:
-            resp = client.chat.completions.create(
-                model=JUDGE_MODEL,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                response_format={"type": "json_object"},
-            )
-            data = json.loads(resp.choices[0].message.content)
-        except Exception as e:
-            print(f"  question-gen skipped for page {c['page']}: {e}")
-            continue
 
-        if data.get("question") and data.get("answer"):
-            questions.append({
-                "question": data["question"].strip(),
-                "reference_answer": data["answer"].strip(),
-                "gold_page": c["page"],
-            })
+    for name, chunks in chunks_by_source.items():
+        # Longer passages give the model enough material for a reasoning question.
+        substantial = [c for c in chunks if len(c["content"]) > 500]
+        sample = random.sample(substantial, min(N_PER_BOOK, len(substantial)))
+        print(f"Generating {len(sample)} questions from {name}...")
+
+        for c in sample:
+            try:
+                resp = client.chat.completions.create(
+                    model=JUDGE_MODEL,
+                    messages=[{"role": "user", "content": TOUGH_PROMPT + c["content"]}],
+                    temperature=0.4,
+                    response_format={"type": "json_object"},
+                )
+                data = json.loads(resp.choices[0].message.content)
+            except Exception as e:
+                print(f"  question-gen skipped ({name} p{c['page']}): {e}")
+                continue
+
+            if data.get("question") and data.get("answer"):
+                questions.append({
+                    "question": data["question"].strip(),
+                    "reference_answer": data["answer"].strip(),
+                    "gold_source": name,
+                    "gold_page": c["page"],
+                })
 
     with open(QUESTIONS_FILE, "w") as f:
         json.dump(questions, f, indent=2)
@@ -96,14 +129,14 @@ def generate_questions(chunks):
     return questions
 
 
-def load_or_generate_questions(chunks):
+def load_or_generate_questions(chunks_by_source):
     if os.path.exists(QUESTIONS_FILE):
         with open(QUESTIONS_FILE) as f:
             questions = json.load(f)
         print(f"Loaded {len(questions)} cached questions from {QUESTIONS_FILE}")
         return questions
-    print("No cached questions — generating from the PDF...")
-    return generate_questions(chunks)
+    print("No cached questions — generating from the PDFs...")
+    return generate_questions(chunks_by_source)
 
 
 # --- LLM-as-judge ------------------------------------------------------------
@@ -144,16 +177,15 @@ def judge(question, reference_answer, context, answer):
 
 
 # --- one arm of the A/B (baseline or reranked) -------------------------------
-def run_arm(question, store, gold_page, rerank):
+def run_arm(question, store, gold_source, gold_page, rerank):
     t0 = time.perf_counter()
     docs = retrieve_chunks(question, store, k=K, fetch_k=FETCH_K, rerank=rerank)
     retrieval_ms = (time.perf_counter() - t0) * 1000.0
 
-    rank = gold_rank(docs, gold_page)
+    rank = gold_rank(docs, gold_source, gold_page)
     context = "\n".join(d.page_content for d in docs)
     answer = generate_answer(question, docs)["answer"]
     return {
-        "docs": docs,
         "context": context,
         "answer": answer,
         "rank": rank,
@@ -197,12 +229,12 @@ def print_report(base, rerank):
 def _selftest():
     """Guard the pure metric logic — the piece most likely to silently break."""
     class D:
-        def __init__(self, page):
-            self.metadata = {"page": page}
-    docs = [D(5), D(2), D(9)]
-    assert gold_rank(docs, 2) == 2
-    assert gold_rank(docs, 5) == 1
-    assert gold_rank(docs, 99) is None
+        def __init__(self, source, page):
+            self.metadata = {"source": source, "page": page}
+    docs = [D("a.pdf", 5), D("b.pdf", 5), D("a.pdf", 9)]
+    assert gold_rank(docs, "b.pdf", 5) == 2      # same page, different book
+    assert gold_rank(docs, "a.pdf", 5) == 1
+    assert gold_rank(docs, "a.pdf", 99) is None
     assert reciprocal_rank(2) == 0.5
     assert reciprocal_rank(None) == 0.0
 
@@ -210,32 +242,27 @@ def _selftest():
 def main():
     _selftest()
 
-    print(f"Building vector store from {os.path.basename(PDF_PATH)} ...")
-    pages = load_pdf(PDF_PATH)
-    chunks = chunk_text(pages, source=os.path.basename(PDF_PATH))
-    store = create_vector_store(chunks)
-    print(f"  {len(pages)} pages -> {len(chunks)} chunks")
+    print("Building vector store from books...")
+    store, chunks_by_source = build_store()
 
-    questions = load_or_generate_questions(chunks)
+    questions = load_or_generate_questions(chunks_by_source)
 
     rows = []
     for i, q in enumerate(questions):
-        print(f"[{i + 1}/{len(questions)}] {q['question'][:70]}")
-        base = run_arm(q["question"], store, q["gold_page"], rerank=False)
-        rer = run_arm(q["question"], store, q["gold_page"], rerank=True)
+        print(f"[{i + 1}/{len(questions)}] ({q['gold_source'][:20]}) {q['question'][:55]}")
+        base = run_arm(q["question"], store, q["gold_source"], q["gold_page"], rerank=False)
+        rer = run_arm(q["question"], store, q["gold_source"], q["gold_page"], rerank=True)
         base["judge"] = judge(q["question"], q["reference_answer"], base["context"], base["answer"])
         rer["judge"] = judge(q["question"], q["reference_answer"], rer["context"], rer["answer"])
-        rows.append({"question": q["question"], "gold_page": q["gold_page"],
-                     "baseline": base, "reranked": rer})
+        rows.append({"question": q["question"], "gold_source": q["gold_source"],
+                     "gold_page": q["gold_page"], "baseline": base, "reranked": rer})
 
     base_sum = summarize(rows, "baseline")
     rer_sum = summarize(rows, "reranked")
     print_report(base_sum, rer_sum)
 
-    # strip non-serializable docs before saving
-    for r in rows:
+    for r in rows:                       # strip bulky context before saving
         for arm in ("baseline", "reranked"):
-            r[arm].pop("docs", None)
             r[arm].pop("context", None)
     with open(RESULTS_FILE, "w") as f:
         json.dump({"baseline": base_sum, "reranked": rer_sum, "rows": rows}, f, indent=2)
