@@ -33,3 +33,6 @@ node_modules/
 # Test/debug artifacts
 .playwright-mcp/
 rag-answer.png
+# eval corpus (large PDFs — teammates download separately)
+backend/eval/corpus/
+backend/eval/faiss_index/

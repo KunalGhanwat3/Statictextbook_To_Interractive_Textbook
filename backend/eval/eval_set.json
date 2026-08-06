@@ -1,0 +1,38 @@
+[
+  {
+    "id": 1,
+    "question": "What is the bootstrap and what is it used for?",
+    "ground_truth_answer": "The bootstrap is a widely applicable statistical tool used to quantify the uncertainty associated with an estimator or statistical learning method, such as estimating the standard errors of the coefficients in a linear regression.",
+    "relevant_pages": [220]
+  },
+  {
+    "id": 2,
+    "question": "In a regression tree, what value is predicted for a test observation?",
+    "ground_truth_answer": "The mean of the response values of the training observations that fall into the same region Rj as that observation.",
+    "relevant_pages": [341]
+  },
+  {
+    "id": 3,
+    "question": "What is a confusion matrix?",
+    "ground_truth_answer": "A table that compares predicted class labels to the true class labels; diagonal entries are correct predictions and off-diagonal entries are misclassifications.",
+    "relevant_pages": [161]
+  },
+  {
+    "id": 4,
+    "question": "In what situation does ridge regression perform best compared to least squares?",
+    "ground_truth_answer": "When the least squares estimates have high variance; ridge regression trades a small increase in bias for a large reduction in variance.",
+    "relevant_pages": [252]
+  },
+  {
+    "id": 5,
+    "question": "How do bias and variance typically change as a model's flexibility increases?",
+    "ground_truth_answer": "As flexibility increases, variance increases and bias decreases. This is the bias-variance trade-off.",
+    "relevant_pages": [44]
+  },
+  {
+    "id": 6,
+    "question": "What does the one-standard-error rule say about choosing a model?",
+    "ground_truth_answer": "Choose the smallest (most parsimonious) model whose estimated test error is within one standard error of the lowest estimated test error.",
+    "relevant_pages": [248]
+  }
+]
